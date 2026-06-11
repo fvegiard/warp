@@ -684,6 +684,7 @@ default = [
     "billing_and_usage_page_v2",
     "remote_code_review",
     "git_operations_in_code_review",
+    "local_claude_only",
 ]
 # Enable this feature to automatically perform heap profiling.  NOTE: This will
 # substantially slow down program execution.
@@ -890,6 +891,7 @@ ai_context_menu_code = []
 expand_edit_to_pane = []
 fallback_model_load_output_messaging = []
 profiles_design_revamp = []
+local_claude_only = []
 search_codebase_ui = []
 linked_code_blocks = []
 tabbed_editor_view = []

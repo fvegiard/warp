@@ -1074,6 +1074,12 @@ pub enum Event {
     SubmitCLIAgentInput {
         text: String,
     },
+    /// Routes an AI prompt from the input bar to the local Claude Code CLI
+    /// instead of Warp's server-side agent. Emitted when
+    /// [`FeatureFlag::LocalClaudeOnly`] is enabled.
+    RouteAIPromptToLocalClaude {
+        text: String,
+    },
     OpenAIDocumentPane {
         document_id: AIDocumentId,
         document_version: AIDocumentVersion,
@@ -13861,6 +13867,26 @@ impl Input {
         self.editor.update(ctx, |editor, ctx| {
             editor.abort_attached_images_future_handle(ctx);
         });
+
+        if FeatureFlag::LocalClaudeOnly.is_enabled() {
+            // Zero-state suggestion chips are server-defined prompts for Warp's
+            // native agent; they have no meaning for the local Claude Code CLI.
+            if zero_state_prompt_suggestion_type.is_some() {
+                return;
+            }
+            let prompt = self.editor.as_ref(ctx).buffer_text(ctx).trim().to_owned();
+            if prompt.is_empty() {
+                return;
+            }
+            self.editor.update(ctx, |editor, ctx| {
+                editor.clear_buffer(ctx);
+            });
+            self.ai_input_model.update(ctx, |model, ctx| {
+                model.handle_input_buffer_submitted(ctx);
+            });
+            ctx.emit(Event::RouteAIPromptToLocalClaude { text: prompt });
+            return;
+        }
 
         // If this is a viewer in a shared session, send the agent prompt
         // to the sharer instead of executing locally.

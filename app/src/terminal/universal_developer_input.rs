@@ -844,8 +844,9 @@ impl View for UniversalDeveloperInputButtonBar {
                 buttons = buttons.with_child(ChildView::new(&self.file_button).finish());
             }
 
-            let show_model_selector = FeatureFlag::ProfilesDesignRevamp.is_enabled()
-                || *SessionSettings::as_ref(app).show_model_selectors_in_prompt;
+            let show_model_selector = !FeatureFlag::LocalClaudeOnly.is_enabled()
+                && (FeatureFlag::ProfilesDesignRevamp.is_enabled()
+                    || *SessionSettings::as_ref(app).show_model_selectors_in_prompt);
             if show_model_selector {
                 buttons = buttons
                     .with_child(create_divider())

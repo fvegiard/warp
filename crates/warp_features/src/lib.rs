@@ -886,6 +886,11 @@ pub enum FeatureFlag {
     /// Gates the SuperGrok feature, which lets users
     /// connect a Grok subscription instead of pasting an API key.
     SuperGrok,
+
+    /// Routes all AI input from the input bar to the local Claude Code CLI
+    /// (authenticated via the user's own Anthropic login) instead of Warp's
+    /// server-side agent, and hides the Warp model/profile selection UI.
+    LocalClaudeOnly,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =

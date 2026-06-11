@@ -501,6 +501,8 @@ fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::CustomInferenceEndpoints,
         #[cfg(feature = "supergrok")]
         FeatureFlag::SuperGrok,
+        #[cfg(feature = "local_claude_only")]
+        FeatureFlag::LocalClaudeOnly,
     ]);
 
     flags

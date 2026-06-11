@@ -81,6 +81,16 @@ const CLI_AGENT_BRACKETED_PASTE_ENTER_DELAY: Duration = Duration::from_millis(30
 /// we overwrite it with the next image.
 const CLI_AGENT_IMAGE_PASTE_DELAY: Duration = Duration::from_millis(300);
 
+/// Poll interval while waiting for the CLI agent session created by a
+/// [`FeatureFlag::LocalClaudeOnly`] launch to be detected.
+#[cfg(all(feature = "local_tty", not(target_family = "wasm")))]
+const LOCAL_CLAUDE_SESSION_POLL_INTERVAL: Duration = Duration::from_millis(400);
+
+/// Number of [`LOCAL_CLAUDE_SESSION_POLL_INTERVAL`] polls before giving up on
+/// auto-opening the rich input composer after a local Claude launch.
+#[cfg(all(feature = "local_tty", not(target_family = "wasm")))]
+const LOCAL_CLAUDE_SESSION_POLL_ATTEMPTS: u8 = 10;
+
 /// ASCII prefixes that CLI agents use to switch input modes (e.g. `!` for bash
 /// mode in Claude Code). When the rich input starts with one of these, the
 /// prefix byte is written to the PTY separately so the agent can process it
@@ -743,6 +753,87 @@ impl TerminalView {
 
         let strategy = rich_input_submit_strategy(agent);
         self.write_cli_agent_text_then_submit(text_bytes, strategy, ctx);
+    }
+
+    /// Routes an AI prompt from the input bar to the local Claude Code CLI
+    /// instead of Warp's server-side agent ([`FeatureFlag::LocalClaudeOnly`]).
+    ///
+    /// Reuses the pane's existing Claude session when one is running;
+    /// otherwise launches `claude` with the prompt as an argument and opens
+    /// the rich input composer once the session is detected, so follow-up
+    /// prompts keep flowing through the input bar.
+    #[cfg(all(feature = "local_tty", not(target_family = "wasm")))]
+    pub(super) fn route_ai_prompt_to_local_claude(
+        &mut self,
+        prompt: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let prompt = prompt.trim().to_owned();
+        if prompt.is_empty() {
+            return;
+        }
+
+        // Return to the terminal so the user sees the claude TUI rather than
+        // the native agent conversation view.
+        if self.agent_view_controller.as_ref(ctx).is_active() {
+            self.agent_view_controller.update(ctx, |controller, ctx| {
+                controller.exit_agent_view(ctx);
+            });
+        }
+
+        // An existing Claude session in this pane receives the prompt
+        // directly, whether or not the rich input composer is open.
+        let has_claude_session = CLIAgentSessionsModel::as_ref(ctx)
+            .session(self.view_id)
+            .is_some_and(|session| matches!(session.agent, CLIAgent::Claude));
+        if has_claude_session {
+            self.submit_text_to_cli_agent_pty(prompt, ctx);
+            return;
+        }
+
+        if crate::util::path::resolve_executable("claude").is_none() {
+            self.show_error_toast(
+                "Claude Code CLI not found. Install it with `npm install -g \
+                 @anthropic-ai/claude-code` and make sure `claude` is on your PATH."
+                    .to_string(),
+                ctx,
+            );
+            return;
+        }
+
+        let command = format!("claude {}", shell_words::quote(&prompt));
+        let started = self
+            .input
+            .update(ctx, |input, ctx| input.try_execute_command(&command, ctx));
+        if started {
+            self.open_rich_input_when_local_claude_starts(LOCAL_CLAUDE_SESSION_POLL_ATTEMPTS, ctx);
+        }
+    }
+
+    /// Polls for the Claude session created by [`Self::route_ai_prompt_to_local_claude`]
+    /// (CLI agent detection runs shortly after the command starts) and opens
+    /// the rich input composer once the session exists. Gives up quietly after
+    /// the attempts are exhausted; the user can still open the composer via
+    /// Ctrl-G or the footer button.
+    #[cfg(all(feature = "local_tty", not(target_family = "wasm")))]
+    fn open_rich_input_when_local_claude_starts(
+        &mut self,
+        attempts_remaining: u8,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        ctx.spawn(
+            Timer::after(LOCAL_CLAUDE_SESSION_POLL_INTERVAL),
+            move |me, _, ctx| {
+                let claude_session_started = CLIAgentSessionsModel::as_ref(ctx)
+                    .session(me.view_id)
+                    .is_some_and(|session| matches!(session.agent, CLIAgent::Claude));
+                if claude_session_started {
+                    me.open_cli_agent_rich_input(CLIAgentInputEntrypoint::AutoShow, ctx);
+                } else if attempts_remaining > 1 {
+                    me.open_rich_input_when_local_claude_starts(attempts_remaining - 1, ctx);
+                }
+            },
+        );
     }
 
     /// Simulates clipboard image paste for each pending image attachment by

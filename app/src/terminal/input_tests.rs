@@ -8047,3 +8047,154 @@ fn ctrl_enter_inserts_newline_in_normal_input_after_rich_input_closes() {
         });
     });
 }
+
+/// Puts the input into (unlocked) AI mode so `input_enter` takes the AI
+/// submission path. Locked AI mode is rejected while `AgentView` is enabled
+/// and the agent view is inactive, so this mirrors autodetected AI input.
+fn set_ai_input_mode_for_test(input: &ViewHandle<Input>, app: &mut App) {
+    input.update(app, |input, ctx| {
+        input.ai_input_model().update(ctx, |ai_input, ctx| {
+            ai_input.set_input_config(
+                InputConfig {
+                    input_type: InputType::AI,
+                    is_locked: false,
+                },
+                false, /* is_input_buffer_empty */
+                None,
+                ctx,
+            );
+        });
+    });
+}
+
+#[test]
+fn local_claude_only_routes_ai_submission_to_local_claude() {
+    App::test((), |mut app| async move {
+        let _agent_mode_flag = FeatureFlag::AgentMode.override_enabled(true);
+        let _local_claude_flag = FeatureFlag::LocalClaudeOnly.override_enabled(true);
+        let _agent_view_flag = FeatureFlag::AgentView.override_enabled(true);
+
+        initialize_app(&mut app);
+
+        let terminal = add_window_with_bootstrapped_terminal(&mut app, None, None).await;
+        let input = terminal.read(&app, |terminal, _| terminal.input().clone());
+
+        let routed: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let entered_agent_view = Rc::new(RefCell::new(false));
+        let routed_clone = routed.clone();
+        let entered_clone = entered_agent_view.clone();
+        app.update(|ctx| {
+            ctx.subscribe_to_view(&input, move |_, event, _| match event {
+                Event::RouteAIPromptToLocalClaude { text } => {
+                    routed_clone.borrow_mut().push(text.clone())
+                }
+                Event::EnterAgentView { .. } => *entered_clone.borrow_mut() = true,
+                _ => {}
+            });
+        });
+
+        input.update(&mut app, |input, ctx| {
+            input.user_insert("what is a symlink", ctx);
+        });
+        set_ai_input_mode_for_test(&input, &mut app);
+        input.update(&mut app, |input, ctx| {
+            input.input_enter(ctx);
+        });
+
+        assert_eq!(
+            routed.borrow().as_slice(),
+            ["what is a symlink".to_owned()],
+            "AI submission should be routed to the local Claude Code CLI"
+        );
+        assert!(
+            !*entered_agent_view.borrow(),
+            "the native agent view must not be entered when LocalClaudeOnly is enabled"
+        );
+        input.read(&app, |input, ctx| {
+            assert!(
+                input.buffer_text(ctx).is_empty(),
+                "buffer should be cleared after routing the prompt"
+            );
+        });
+    });
+}
+
+#[test]
+fn local_claude_only_ignores_empty_ai_submission() {
+    App::test((), |mut app| async move {
+        let _agent_mode_flag = FeatureFlag::AgentMode.override_enabled(true);
+        let _local_claude_flag = FeatureFlag::LocalClaudeOnly.override_enabled(true);
+        let _agent_view_flag = FeatureFlag::AgentView.override_enabled(true);
+
+        initialize_app(&mut app);
+
+        let terminal = add_window_with_bootstrapped_terminal(&mut app, None, None).await;
+        let input = terminal.read(&app, |terminal, _| terminal.input().clone());
+
+        set_ai_input_mode_for_test(&input, &mut app);
+
+        let routed_count = Rc::new(RefCell::new(0usize));
+        let routed_clone = routed_count.clone();
+        app.update(|ctx| {
+            ctx.subscribe_to_view(&input, move |_, event, _| {
+                if matches!(event, Event::RouteAIPromptToLocalClaude { .. }) {
+                    *routed_clone.borrow_mut() += 1;
+                }
+            });
+        });
+
+        input.update(&mut app, |input, ctx| {
+            input.input_enter(ctx);
+        });
+
+        assert_eq!(
+            *routed_count.borrow(),
+            0,
+            "an empty AI submission should not be routed anywhere"
+        );
+    });
+}
+
+#[test]
+fn local_claude_only_disabled_preserves_native_agent_path() {
+    App::test((), |mut app| async move {
+        let _agent_mode_flag = FeatureFlag::AgentMode.override_enabled(true);
+        let _local_claude_flag = FeatureFlag::LocalClaudeOnly.override_enabled(false);
+        let _agent_view_flag = FeatureFlag::AgentView.override_enabled(true);
+
+        initialize_app(&mut app);
+
+        let terminal = add_window_with_bootstrapped_terminal(&mut app, None, None).await;
+        let input = terminal.read(&app, |terminal, _| terminal.input().clone());
+
+        let routed_count = Rc::new(RefCell::new(0usize));
+        let entered_agent_view = Rc::new(RefCell::new(false));
+        let routed_clone = routed_count.clone();
+        let entered_clone = entered_agent_view.clone();
+        app.update(|ctx| {
+            ctx.subscribe_to_view(&input, move |_, event, _| match event {
+                Event::RouteAIPromptToLocalClaude { .. } => *routed_clone.borrow_mut() += 1,
+                Event::EnterAgentView { .. } => *entered_clone.borrow_mut() = true,
+                _ => {}
+            });
+        });
+
+        input.update(&mut app, |input, ctx| {
+            input.user_insert("what is a symlink", ctx);
+        });
+        set_ai_input_mode_for_test(&input, &mut app);
+        input.update(&mut app, |input, ctx| {
+            input.input_enter(ctx);
+        });
+
+        assert!(
+            *entered_agent_view.borrow(),
+            "with LocalClaudeOnly disabled, AI submission should enter the agent view"
+        );
+        assert_eq!(
+            *routed_count.borrow(),
+            0,
+            "nothing should be routed to the local Claude Code CLI when the flag is off"
+        );
+    });
+}

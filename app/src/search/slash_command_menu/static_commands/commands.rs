@@ -631,8 +631,13 @@ fn all_commands() -> Vec<StaticCommand> {
         USAGE,
         CONVERSATIONS,
         EXPORT_TO_CLIPBOARD,
-        MODEL.clone(),
     ];
+
+    // Warp model selection is meaningless when all AI input routes to the
+    // local Claude Code CLI.
+    if !FeatureFlag::LocalClaudeOnly.is_enabled() {
+        commands.push(MODEL.clone());
+    }
 
     if FeatureFlag::LocalDockerSandbox.is_enabled() {
         commands.push(CREATE_DOCKER_SANDBOX);
@@ -709,7 +714,8 @@ fn all_commands() -> Vec<StaticCommand> {
         commands.push(MOVE_TO_CLOUD.clone());
     }
 
-    if FeatureFlag::InlineProfileSelector.is_enabled() {
+    if FeatureFlag::InlineProfileSelector.is_enabled() && !FeatureFlag::LocalClaudeOnly.is_enabled()
+    {
         commands.push(PROFILE.clone());
     }
 

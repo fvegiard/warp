@@ -21723,6 +21723,12 @@ impl TerminalView {
             InputEvent::SubmitCLIAgentInput { text } => {
                 self.submit_cli_agent_rich_input(text.clone(), ctx);
             }
+            #[cfg(all(feature = "local_tty", not(target_family = "wasm")))]
+            InputEvent::RouteAIPromptToLocalClaude { text } => {
+                self.route_ai_prompt_to_local_claude(text.clone(), ctx);
+            }
+            #[cfg(not(all(feature = "local_tty", not(target_family = "wasm"))))]
+            InputEvent::RouteAIPromptToLocalClaude { .. } => {}
             InputEvent::OpenAIDocumentPane {
                 document_id,
                 document_version,

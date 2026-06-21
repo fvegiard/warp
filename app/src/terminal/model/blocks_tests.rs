@@ -1646,10 +1646,10 @@ fn test_conversation_scoped_rich_content_hidden_outside_fullscreen_agent_view() 
     assert!(item_hidden_in_inline.is_some_and(|item| item.should_hide));
 }
 
-/// Test that AI block rich content inserted in the style of the restore path
-/// (with explicit content_type = AIBlock and precomputed should_hide) is correctly
-/// hidden/shown as agent view state changes. This covers the path in
-/// load_ai_conversation::create_and_insert_ai_block + BlockList visibility recompute.
+/// Test that AI block rich content inserted via the restore path
+/// (`insert_rich_content_before_block_index` with `should_hide` computed in
+/// `create_and_insert_ai_block`) is recomputed correctly on agent view updates.
+/// Mirrors the insertion in load_ai_conversation.rs and exercises dirty + recompute.
 #[test]
 fn test_restored_ai_block_rich_content_respects_agent_view_state_transitions() {
     FeatureFlag::AgentView.set_enabled(true);
@@ -1664,11 +1664,11 @@ fn test_restored_ai_block_rich_content_respects_agent_view_state_transitions() {
         Some(RichContentType::AIBlock),
         view_id,
         Some(conversation_id),
-        true, // should_hide as computed at insert time under Inactive
+        false, // should_hide=false when no active matching conversation at insert time (per create_and_insert_ai_block)
     );
-    block_list.append_rich_content(item, false);
+    block_list.insert_rich_content_before_block_index(item, 0);
 
-    // Immediately after insert (state still Inactive): hidden with zero height contribution
+    // Immediately after insert (state still Inactive): should_hide=false at insert time (recompute happens on set_agent_view_state)
     let stored = block_list
         .block_heights()
         .items()
@@ -1678,7 +1678,7 @@ fn test_restored_ai_block_rich_content_respects_agent_view_state_transitions() {
             _ => None,
         })
         .expect("rich content item should be present");
-    assert!(stored.should_hide, "restore-inserted AI block should start hidden when not in its conv");
+    assert!(!stored.should_hide, "restore-inserted AI block starts with should_hide=false; recompute via set_agent_view_state");
     let contrib_height = block_list
         .block_heights()
         .items()
@@ -1689,6 +1689,29 @@ fn test_restored_ai_block_rich_content_respects_agent_view_state_transitions() {
         })
         .unwrap();
     assert_lines_approx_eq!(contrib_height, 0.0);
+
+    // Explicitly trigger recompute for the current Inactive state (as done after restore in real flow)
+    block_list.set_agent_view_state(AgentViewState::Inactive);
+    let hidden_after_recompute = block_list
+        .block_heights()
+        .items()
+        .iter()
+        .find_map(|it| match it {
+            BlockHeightItem::RichContent(r) if r.view_id == view_id => Some(*r),
+            _ => None,
+        })
+        .expect("rich content still present after recompute");
+    assert!(hidden_after_recompute.should_hide, "recompute on Inactive makes the restored AIBlock hidden");
+    let height_after_recompute = block_list
+        .block_heights()
+        .items()
+        .iter()
+        .find_map(|it| match it {
+            BlockHeightItem::RichContent(r) if r.view_id == view_id => Some(it.height()),
+            _ => None,
+        })
+        .unwrap();
+    assert_lines_approx_eq!(height_after_recompute, 0.0);
 
     // Enter FullScreen for this conversation → should become visible
     block_list.set_agent_view_state(AgentViewState::Active {

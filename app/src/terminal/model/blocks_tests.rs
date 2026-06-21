@@ -15,6 +15,7 @@ use crate::terminal::model::ansi::Handler;
 use crate::terminal::model::block::AgentInteractionMetadata;
 use crate::terminal::model::test_utils;
 use crate::terminal::model::test_utils::TestBlockListBuilder;
+use crate::terminal::model::rich_content::RichContentType;
 use crate::terminal::view::{InlineBannerItem, InlineBannerType};
 use crate::terminal::{BlockListSettings, SizeUpdateReason};
 
@@ -1643,6 +1644,106 @@ fn test_conversation_scoped_rich_content_hidden_outside_fullscreen_agent_view() 
             });
     assert!(item_hidden_in_inline.is_some());
     assert!(item_hidden_in_inline.is_some_and(|item| item.should_hide));
+}
+
+/// Test that AI block rich content inserted in the style of the restore path
+/// (with explicit content_type = AIBlock and precomputed should_hide) is correctly
+/// hidden/shown as agent view state changes. This covers the path in
+/// load_ai_conversation::create_and_insert_ai_block + BlockList visibility recompute.
+#[test]
+fn test_restored_ai_block_rich_content_respects_agent_view_state_transitions() {
+    FeatureFlag::AgentView.set_enabled(true);
+    let mut block_list =
+        new_bootstrapped_block_list(None, None, ChannelEventListener::new_for_test());
+    let conversation_id = AIConversationId::new();
+    let view_id = EntityId::new();
+
+    // Simulate the restore insertion: agent_view_conversation_id set, should_hide precomputed
+    // as it would be when inserted while Inactive (no matching active conv).
+    let item = RichContentItem::new(
+        Some(RichContentType::AIBlock),
+        view_id,
+        Some(conversation_id),
+        true, // should_hide as computed at insert time under Inactive
+    );
+    block_list.append_rich_content(item, false);
+
+    // Immediately after insert (state still Inactive): hidden with zero height contribution
+    let stored = block_list
+        .block_heights()
+        .items()
+        .iter()
+        .find_map(|it| match it {
+            BlockHeightItem::RichContent(r) if r.view_id == view_id => Some(*r),
+            _ => None,
+        })
+        .expect("rich content item should be present");
+    assert!(stored.should_hide, "restore-inserted AI block should start hidden when not in its conv");
+    let contrib_height = block_list
+        .block_heights()
+        .items()
+        .iter()
+        .find_map(|it| match it {
+            BlockHeightItem::RichContent(r) if r.view_id == view_id => Some(it.height()),
+            _ => None,
+        })
+        .unwrap();
+    assert_lines_approx_eq!(contrib_height, 0.0);
+
+    // Enter FullScreen for this conversation → should become visible
+    block_list.set_agent_view_state(AgentViewState::Active {
+        conversation_id,
+        origin: AgentViewEntryOrigin::Input {
+            was_prompt_autodetected: false,
+        },
+        display_mode: AgentViewDisplayMode::FullScreen,
+        original_conversation_length: 0,
+    });
+
+    let visible = block_list
+        .block_heights()
+        .items()
+        .iter()
+        .find_map(|it| match it {
+            BlockHeightItem::RichContent(r) if r.view_id == view_id => Some(*r),
+            _ => None,
+        })
+        .expect("rich content still present");
+    assert!(!visible.should_hide);
+    assert!(visible.last_laid_out_height > BlockHeight::zero());
+
+    // Back to Inactive → hidden again
+    block_list.set_agent_view_state(AgentViewState::Inactive);
+    let hidden_again = block_list
+        .block_heights()
+        .items()
+        .iter()
+        .find_map(|it| match it {
+            BlockHeightItem::RichContent(r) if r.view_id == view_id => Some(*r),
+            _ => None,
+        })
+        .expect("rich content still present");
+    assert!(hidden_again.should_hide);
+
+    // Inline for the conv → hidden (per RichContentItem::should_hide_for_agent_view_state rules)
+    block_list.set_agent_view_state(AgentViewState::Active {
+        conversation_id,
+        origin: AgentViewEntryOrigin::Input {
+            was_prompt_autodetected: false,
+        },
+        display_mode: AgentViewDisplayMode::Inline,
+        original_conversation_length: 0,
+    });
+    let inline_hidden = block_list
+        .block_heights()
+        .items()
+        .iter()
+        .find_map(|it| match it {
+            BlockHeightItem::RichContent(r) if r.view_id == view_id => Some(*r),
+            _ => None,
+        })
+        .expect("rich content still present");
+    assert!(inline_hidden.should_hide);
 }
 
 #[test]

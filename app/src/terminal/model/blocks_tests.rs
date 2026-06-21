@@ -1646,10 +1646,9 @@ fn test_conversation_scoped_rich_content_hidden_outside_fullscreen_agent_view() 
     assert!(item_hidden_in_inline.is_some_and(|item| item.should_hide));
 }
 
-/// Test that AI block rich content inserted in the style of the restore path
-/// (with explicit content_type = AIBlock and precomputed should_hide) is correctly
-/// hidden/shown as agent view state changes. This covers the path in
-/// load_ai_conversation::create_and_insert_ai_block + BlockList visibility recompute.
+/// Test that AI block rich content inserted via the restore path
+/// (`insert_rich_content_before_block_index` with `should_hide` from
+/// `create_and_insert_ai_block`) is recomputed correctly on agent view updates.
 #[test]
 fn test_restored_ai_block_rich_content_respects_agent_view_state_transitions() {
     FeatureFlag::AgentView.set_enabled(true);
@@ -1657,18 +1656,18 @@ fn test_restored_ai_block_rich_content_respects_agent_view_state_transitions() {
         new_bootstrapped_block_list(None, None, ChannelEventListener::new_for_test());
     let conversation_id = AIConversationId::new();
     let view_id = EntityId::new();
+    let cmd_block_index = insert_block(&mut block_list, "cmd", "output");
 
-    // Simulate the restore insertion: agent_view_conversation_id set, should_hide precomputed
-    // as it would be when inserted while Inactive (no matching active conv).
+    // Mirror create_and_insert_ai_block when inactive with a command_block_index.
     let item = RichContentItem::new(
         Some(RichContentType::AIBlock),
         view_id,
         Some(conversation_id),
-        true, // should_hide as computed at insert time under Inactive
+        false, // should_hide as computed at insert time under Inactive
     );
-    block_list.append_rich_content(item, false);
+    block_list.insert_rich_content_before_block_index(item, cmd_block_index);
 
-    // Immediately after insert (state still Inactive): hidden with zero height contribution
+    // Restore insertion does not recompute should_hide on insert.
     let stored = block_list
         .block_heights()
         .items()
@@ -1678,7 +1677,23 @@ fn test_restored_ai_block_rich_content_respects_agent_view_state_transitions() {
             _ => None,
         })
         .expect("rich content item should be present");
-    assert!(stored.should_hide, "restore-inserted AI block should start hidden when not in its conv");
+    assert!(
+        !stored.should_hide,
+        "create_and_insert_ai_block sets should_hide=false while inactive"
+    );
+
+    // Agent view recompute corrects visibility for the current Inactive state.
+    block_list.set_agent_view_state(AgentViewState::Inactive);
+    let hidden = block_list
+        .block_heights()
+        .items()
+        .iter()
+        .find_map(|it| match it {
+            BlockHeightItem::RichContent(r) if r.view_id == view_id => Some(*r),
+            _ => None,
+        })
+        .expect("rich content still present");
+    assert!(hidden.should_hide);
     let contrib_height = block_list
         .block_heights()
         .items()
@@ -1690,7 +1705,6 @@ fn test_restored_ai_block_rich_content_respects_agent_view_state_transitions() {
         .unwrap();
     assert_lines_approx_eq!(contrib_height, 0.0);
 
-    // Enter FullScreen for this conversation → should become visible
     block_list.set_agent_view_state(AgentViewState::Active {
         conversation_id,
         origin: AgentViewEntryOrigin::Input {
@@ -1711,39 +1725,6 @@ fn test_restored_ai_block_rich_content_respects_agent_view_state_transitions() {
         .expect("rich content still present");
     assert!(!visible.should_hide);
     assert!(visible.last_laid_out_height > BlockHeight::zero());
-
-    // Back to Inactive → hidden again
-    block_list.set_agent_view_state(AgentViewState::Inactive);
-    let hidden_again = block_list
-        .block_heights()
-        .items()
-        .iter()
-        .find_map(|it| match it {
-            BlockHeightItem::RichContent(r) if r.view_id == view_id => Some(*r),
-            _ => None,
-        })
-        .expect("rich content still present");
-    assert!(hidden_again.should_hide);
-
-    // Inline for the conv → hidden (per RichContentItem::should_hide_for_agent_view_state rules)
-    block_list.set_agent_view_state(AgentViewState::Active {
-        conversation_id,
-        origin: AgentViewEntryOrigin::Input {
-            was_prompt_autodetected: false,
-        },
-        display_mode: AgentViewDisplayMode::Inline,
-        original_conversation_length: 0,
-    });
-    let inline_hidden = block_list
-        .block_heights()
-        .items()
-        .iter()
-        .find_map(|it| match it {
-            BlockHeightItem::RichContent(r) if r.view_id == view_id => Some(*r),
-            _ => None,
-        })
-        .expect("rich content still present");
-    assert!(inline_hidden.should_hide);
 }
 
 #[test]

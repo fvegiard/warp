@@ -35,11 +35,13 @@ const clientMutations = [
   'grabNotebookEditAccess',
   'issueTaskIdentityToken',
   'joinTeamWithTeamDiscovery',
+  'joinWorkspaceFromDiscovery',
   'leaveObject',
   'markAcceptedIntelligentAutosuggestion',
   'mintCustomToken',
   'moveObject',
   'populateMerkleTreeCache',
+  'prewarmedSandboxConfig',
   'provideNegativeFeedbackResponseForAiConversation',
   'purchaseAddonCredits',
   'recordObjectAction',
@@ -102,6 +104,7 @@ const clientQueries = [
   'task',
   'taskGitCredentials',
   'taskSecrets',
+  'tuiOnboardingMarkers',
   'listAIConversations',
   'suggestCloudEnvironmentImage'
 ];

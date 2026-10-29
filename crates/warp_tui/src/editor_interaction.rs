@@ -567,7 +567,7 @@ pub(crate) fn apply_editor_clipboard_action(
 fn apply_editor_clipboard_action_with(
     model: &ModelHandle<CodeEditorModel>,
     action: TuiEditorClipboardAction,
-    copy: impl FnOnce(&str) -> anyhow::Result<()>,
+    copy: impl FnOnce(&str) -> anyhow::Result<_>,
     ctx: &mut AppContext,
 ) -> anyhow::Result<bool> {
     let selected_text = model
@@ -589,7 +589,7 @@ fn apply_editor_clipboard_action_with(
 pub(crate) fn apply_editor_clipboard_action_for_test(
     model: &ModelHandle<CodeEditorModel>,
     action: TuiEditorClipboardAction,
-    copy: impl FnOnce(&str) -> anyhow::Result<()>,
+    copy: impl FnOnce(&str) -> anyhow::Result<_>,
     ctx: &mut AppContext,
 ) -> anyhow::Result<bool> {
     apply_editor_clipboard_action_with(model, action, copy, ctx)

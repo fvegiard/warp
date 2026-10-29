@@ -17,12 +17,22 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use warp_terminal::model::escape_sequences::{C0, C1, tmux_passthrough};
 
+/// Outcome of a clipboard copy, indicating whether the copy was confirmed
+/// locally or only requested from the terminal via OSC 52.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClipboardCopyOutcome {
+    /// Written to the OS clipboard via the native backend.
+    Native,
+    /// Requested from the terminal via OSC 52 (not confirmed).
+    Osc52,
+}
+
 /// Copies `text` to the clipboard, selecting the transport from the environment.
 ///
 /// Local sessions write to the OS clipboard via `arboard`, falling back to OSC 52
 /// when the native backend is unavailable; remote/SSH sessions use OSC 52
 /// directly. Returns an error only when the copy genuinely fails.
-pub(crate) fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
+pub(crate) fn copy_to_clipboard(text: &str) -> anyhow::Result<ClipboardCopyOutcome> {
     let is_remote =
         std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some();
     let in_tmux = std::env::var_os("TMUX").is_some();
@@ -32,7 +42,7 @@ pub(crate) fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
         // only option.
         let mut stdout = io::stdout().lock();
         write_osc52_sequences(text, in_tmux, &mut stdout)?;
-        return Ok(());
+        return Ok(ClipboardCopyOutcome::Osc52);
     }
 
     // Local: prefer a native write; fall back to OSC 52 only when the native
@@ -41,8 +51,10 @@ pub(crate) fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
         log::warn!("Native clipboard write failed, falling back to OSC 52: {error}");
         let mut stdout = io::stdout().lock();
         write_osc52_sequences(text, in_tmux, &mut stdout)?;
+        Ok(ClipboardCopyOutcome::Osc52)
+    } else {
+        Ok(ClipboardCopyOutcome::Native)
     }
-    Ok(())
 }
 
 /// Writes `text` to the OS clipboard via a process-lifetime `arboard` handle

@@ -1936,7 +1936,7 @@ impl TuiTerminalSessionView {
                     .update(ctx, |input, ctx| input.clear_selection(ctx));
             }
             TuiTranscriptViewEvent::SelectionEnded(text) => match copy_to_clipboard(text) {
-                Ok(()) => view.show_copy_hint(ctx),
+                Ok(_) => view.show_copy_hint(ctx),
                 Err(error) => {
                     log::warn!("Failed to copy TUI selection: {error}");
                     view.show_transient_hint(COPY_FAILED_HINT.to_owned(), ctx);
@@ -4804,11 +4804,16 @@ impl TuiTerminalSessionView {
                     let markdown =
                         conversation.export_to_markdown(Some(self.ai_action_model.as_ref(ctx)));
                     match copy_to_clipboard(&markdown) {
-                        Ok(()) => {
-                            self.show_success_hint(
-                                "Conversation copied to clipboard".to_owned(),
-                                ctx,
-                            );
+                        Ok(outcome) => {
+                            let message = match outcome {
+                                crate::clipboard::ClipboardCopyOutcome::Native => {
+                                    "Conversation copied to clipboard".to_owned()
+                                }
+                                crate::clipboard::ClipboardCopyOutcome::Osc52 => {
+                                    "Copy request sent to terminal (OSC 52)".to_owned()
+                                }
+                            };
+                            self.show_success_hint(message, ctx);
                         }
                         Err(error) => {
                             log::warn!("Failed to export TUI conversation: {error}");
@@ -4870,7 +4875,7 @@ impl TuiTerminalSessionView {
                     .map(|token| token.debugging_payload(None));
                 match debugging_payload {
                     Some(debugging_payload) => match copy_to_clipboard(&debugging_payload) {
-                        Ok(()) => {
+                        Ok(_) => {
                             self.show_success_hint(COPY_DEBUGGING_ID_HINT.to_owned(), ctx);
                         }
                         Err(error) => {
@@ -5781,7 +5786,7 @@ impl TypedActionView for TuiTerminalSessionView {
             }
             TuiTerminalSessionAction::ReadOnlyMenuSelectionEnded(text) => {
                 match copy_to_clipboard(text) {
-                    Ok(()) => self.show_copy_hint(ctx),
+                    Ok(_) => self.show_copy_hint(ctx),
                     Err(error) => {
                         log::warn!("Failed to copy TUI read-only menu selection: {error}");
                         self.show_transient_hint(COPY_FAILED_HINT.to_owned(), ctx);

@@ -88,7 +88,7 @@ use crate::attachment_bar::{
 use crate::cli_agent_osc_event_publisher::{
     CliAgentOscEventPublisher, host_supports_cli_agent_notifications,
 };
-use crate::clipboard::copy_to_clipboard;
+use crate::clipboard::{ClipboardCopyOutcome, copy_to_clipboard};
 use crate::completion_menu::TuiCompletionMenuModel;
 use crate::conversation_menu::{TuiConversationMenuEvent, TuiConversationMenuModel};
 use crate::conversation_selection::TuiConversationSelection;
@@ -4806,10 +4806,10 @@ impl TuiTerminalSessionView {
                     match copy_to_clipboard(&markdown) {
                         Ok(outcome) => {
                             let message = match outcome {
-                                crate::clipboard::ClipboardCopyOutcome::Native => {
+                                ClipboardCopyOutcome::Native => {
                                     "Conversation copied to clipboard".to_owned()
                                 }
-                                crate::clipboard::ClipboardCopyOutcome::Osc52 => {
+                                ClipboardCopyOutcome::Osc52 => {
                                     "Copy request sent to terminal (OSC 52)".to_owned()
                                 }
                             };

@@ -343,7 +343,9 @@ fn init(
             ctx.subscribe_to_model(&login_model, move |_, event, ctx| match event {
                 TuiLoginEvent::PhaseChanged => {
                     root_for_login.update(ctx, |root, ctx| {
-                        root.handle_login_phase_changed(ctx, copy_to_clipboard);
+                        root.handle_login_phase_changed(ctx, |text| {
+                            copy_to_clipboard(text).map(|_| ())
+                        });
                     });
                 }
                 TuiLoginEvent::LoggedIn => {

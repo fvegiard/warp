@@ -2537,7 +2537,7 @@ impl BlockList {
                 )
             })
             .collect::<HashMap<EntityId, BlockHeight>>();
-        self.update_rich_content_heights_in_lines(&updated_heights);
+        self.update_blocks_and_sumtree(None, Some(&updated_heights), |_| {}, |_| {});
     }
 
     /// Updates rich-content heights already measured in the canonical line unit
@@ -2546,7 +2546,50 @@ impl BlockList {
         &mut self,
         updated_heights: &HashMap<EntityId, BlockHeight>,
     ) {
-        self.update_blocks_and_sumtree(None, Some(updated_heights), |_| {}, |_| {});
+        // The full rebuild also refreshes scope-dependent visibility of non-updated items.
+        if self.transcript_scope != TranscriptScope::Unfiltered {
+            self.update_blocks_and_sumtree(None, Some(updated_heights), |_| {}, |_| {});
+            return;
+        }
+
+        // A streaming update usually changes one height. Reuse all untouched transcript subtrees.
+        let mut cursor = self.block_heights.cursor::<TotalIndex, ()>();
+        let mut updates = updated_heights
+            .iter()
+            .filter_map(|(&view_id, &height)| {
+                let index = *self
+                    .removable_blocklist_item_positions
+                    .get(&RemovableBlocklistItem::RichContent(view_id))?;
+                cursor.seek(&index, SeekBias::Right);
+                let BlockHeightItem::RichContent(item) = *cursor.item()? else {
+                    return None;
+                };
+                (item.view_id == view_id
+                    && (item.last_laid_out_height != height || item.should_hide))
+                    .then_some((
+                        index,
+                        BlockHeightItem::RichContent(RichContentItem {
+                            last_laid_out_height: height,
+                            should_hide: false,
+                            ..item
+                        }),
+                    ))
+            })
+            .collect::<Vec<_>>();
+        if updates.is_empty() {
+            return;
+        }
+        updates.sort_unstable_by_key(|(index, _)| *index);
+
+        let mut cursor = self.block_heights.cursor::<TotalIndex, ()>();
+        let mut new_tree = SumTree::new();
+        for (index, item) in updates {
+            new_tree.push_tree(cursor.slice(&index, SeekBias::Right));
+            new_tree.push(item);
+            cursor.next();
+        }
+        new_tree.push_tree(cursor.suffix());
+        self.block_heights = new_tree;
     }
 
     pub fn set_show_in_band_command_blocks(&mut self, should_show_in_band_command_blocks: bool) {

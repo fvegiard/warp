@@ -110,17 +110,10 @@ impl Index {
 
         let mut entry_builder = EntryBuilder::new();
 
-        // Loop over rows in the old index, processing each grapheme in order
-        // and adding newlines where appropriate.
-        //
-        // TODO(vorporeal): This can be significantly optimized - processing
-        // each grapheme individually is a clearly poor choice in the (common)
-        // case of a grid that contains only ASCII text.  We could take more
-        // advantage of the run-length encoded `GraphemeRun` structure here.
         for row_idx in 0..old_index.len() {
-            if let Some(grapheme_infos) = old_index.grapheme_infos_for_row(row_idx) {
-                for info in grapheme_infos {
-                    entry_builder.process_grapheme_info(info, &mut index);
+            if let Some(runs) = old_index.grapheme_runs_for_row(row_idx) {
+                for &run in runs {
+                    entry_builder.reflow_grapheme_run(run, &mut index);
                 }
             }
             if old_index
@@ -499,6 +492,28 @@ impl EntryBuilder {
         self.process_grapheme_info(grapheme.sizing_info(), index);
     }
 
+    fn reflow_grapheme_run(&mut self, run: GraphemeRun, index: &mut Index) {
+        // Wide graphemes need spacer handling when they straddle the right edge.
+        if run.count == NonZeroU16::MIN || run.info.cell_width != 1 || index.columns == 0 {
+            for _ in 0..run.count.get() {
+                self.process_grapheme_info(run.info, index);
+            }
+            return;
+        }
+
+        let mut remaining = usize::from(run.count.get());
+        while remaining > 0 {
+            if self.num_cells >= index.columns {
+                std::mem::take(self).append_to_index(index);
+            }
+            let count = remaining.min(index.columns - self.num_cells);
+            self.num_cells += count;
+            // `count` is positive and bounded by the original u16 run length.
+            self.append_grapheme_run(run.info, NonZeroU16::new(count as u16).unwrap());
+            remaining -= count;
+        }
+    }
+
     /// Processes the next grapheme in the row, based only on its sizing
     /// information (and not its content).
     fn process_grapheme_info(&mut self, info: GraphemeInfo, index: &mut Index) {
@@ -545,9 +560,11 @@ impl EntryBuilder {
     /// Callers will need to invoke [`Self::add_leading_wide_char_spacer`] and
     /// [`Self::append_to_index`] as appropriate.
     pub fn process_grapheme_info_unchecked(&mut self, info: GraphemeInfo) {
-        let grapheme_len = info.utf8_bytes.get() as usize;
+        self.append_grapheme_run(info, NonZeroU16::MIN);
+    }
 
-        self.incr_content_offset += grapheme_len;
+    fn append_grapheme_run(&mut self, info: GraphemeInfo, count: NonZeroU16) {
+        self.incr_content_offset += usize::from(info.utf8_bytes.get()) * usize::from(count.get());
 
         // Store information about this grapheme's cell width and UTF-8 length.
         match self.grapheme_runs.last_mut() {
@@ -556,14 +573,11 @@ impl EntryBuilder {
                 // if we remove the error checking here.
                 last_run.count = last_run
                     .count
-                    .checked_add(1)
+                    .checked_add(count.get())
                     .expect("should not have more than 2^16 graphemes in a single row");
             }
             _ => {
-                self.grapheme_runs.push(GraphemeRun {
-                    count: unsafe { NonZeroU16::new_unchecked(1) },
-                    info,
-                });
+                self.grapheme_runs.push(GraphemeRun { count, info });
             }
         }
     }

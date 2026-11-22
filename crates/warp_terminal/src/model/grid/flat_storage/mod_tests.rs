@@ -174,6 +174,34 @@ fn test_row_roundtrip_and_resize() {
 }
 
 #[test]
+fn reflow_splits_runs_without_adding_a_row_after_a_full_line() {
+    let text = "abcdefghijkl\n\néééééééé";
+    let mut storage = FlatStorage::from_content_using_rows(text, 8, None);
+
+    storage.set_columns(4);
+
+    let actual = storage
+        .rows_from(0)
+        .map(|row| row.as_ref().clone())
+        .collect_vec();
+    assert_rows_equal(&actual, &text.to_rows(4));
+}
+
+#[test]
+fn reflow_merges_runs_across_soft_wraps_and_preserves_wide_spacers() {
+    let text = "abcdef😀😃xyz\n";
+    let mut storage = FlatStorage::from_content_using_rows(text, 4, None);
+
+    storage.set_columns(7);
+
+    let actual = storage
+        .rows_from(0)
+        .map(|row| row.as_ref().clone())
+        .collect_vec();
+    assert_rows_equal(&actual, &text.to_rows(7));
+}
+
+#[test]
 fn test_styling_change_within_trailing_empty_cells() {
     let num_cols = 5;
     let mut rows = "a\nb\n".to_rows(num_cols);

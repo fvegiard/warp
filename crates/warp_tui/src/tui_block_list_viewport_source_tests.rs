@@ -10,7 +10,7 @@ use warp::tui_export::{
     AIAgentText, AIAgentTextSection, AIBlockModel, AIBlockOutputStatus, AIConversationId,
     AIRequestType, Appearance, BlockHeight, BlockHeightItem, CancellationReason, LLMId, MessageId,
     OutputStatusUpdateCallback, RichContentItem, RichContentType, ServerOutputId, Shared,
-    TerminalModel, UserQueryMode,
+    TerminalModel, TranscriptScope, UserQueryMode,
 };
 use warpui::platform::WindowStyle;
 use warpui::{AddWindowOptions, EntityId, EntityIdMap, ViewHandle};
@@ -107,6 +107,35 @@ fn viewport_layout_omits_unchanged_agent_block_resize() {
 
         assert!(source.take_selection_row_resizes().is_empty());
     });
+}
+
+#[test]
+fn sparse_height_updates_preserve_transcript_order_and_untouched_heights() {
+    let mut model = TerminalModel::mock(None, None);
+    let block_list = model.block_list_mut();
+    block_list.set_transcript_scope(TranscriptScope::Unfiltered);
+    let [first, untouched, third, fourth] = std::array::from_fn(|_| EntityId::new());
+    for view_id in [first, untouched, third, fourth] {
+        block_list.append_rich_content(
+            RichContentItem::new(Some(RichContentType::AIBlock), view_id, None, false),
+            false,
+        );
+    }
+    block_list.update_rich_content_heights_in_lines(&HashMap::from([(
+        untouched,
+        BlockHeight::from(2.0_f64),
+    )]));
+
+    block_list.update_rich_content_heights_in_lines(&HashMap::from([
+        (fourth, BlockHeight::from(3.0_f64)),
+        (first, BlockHeight::from(4.0_f64)),
+        (third, BlockHeight::zero()),
+    ]));
+
+    assert_eq!(block_list.rich_content_row_range(first), Some(0..4));
+    assert_eq!(block_list.rich_content_row_range(untouched), Some(4..6));
+    assert_eq!(block_list.rich_content_row_range(third), Some(6..6));
+    assert_eq!(block_list.rich_content_row_range(fourth), Some(6..9));
 }
 
 /// Verifies read-only extraction preserves cached heights and dirty state.
@@ -680,6 +709,9 @@ fn seeded_agent_block_source(
     ViewHandle<TuiAIBlock>,
 ) {
     let mut model = TerminalModel::mock(None, None);
+    model
+        .block_list_mut()
+        .set_transcript_scope(TranscriptScope::Unfiltered);
     if preceding_rows > 0 {
         model.simulate_block("printf", &"x\r\n".repeat(preceding_rows));
     }
